@@ -36,7 +36,8 @@ def generate_code(order, name, precision='double',
                   include_dir=None, src_dir=None,
                   potential=True, field=True,
                   source_order=0, atomic=False,
-                  gpu=False, minpow=0, language='c', save_opscounts=None):
+                  gpu=False, minpow=0, language='c', save_opscounts=None,
+                  name_prefix="", write_defines=True, write_templates=False):
     """
     Inputs:
 
@@ -87,8 +88,8 @@ def generate_code(order, name, precision='double',
         fext = 'c'
         hext = 'h'
     if language == 'c++':
-        fext = 'cpp'
-        hext = 'h'
+        fext = 'cc'
+        hext = 'hh'
 
 
     logger.info(f"Generating FMM operators to order {order}")
@@ -108,6 +109,12 @@ def generate_code(order, name, precision='double',
     symbols = (x, y, z)
     coords = [x, y, z]
 
+    if potential and not field:
+        osize = 1
+    elif field and not potential:
+        osize = 3
+    elif field and potential:
+        osize = 4
 
     start = source_order
     if field:
@@ -138,14 +145,14 @@ def generate_code(order, name, precision='double',
 
         M = sp.Matrix(generate_M_operators(i, symbols, M_dict))
         
-        head, code, P2M_opscount = p.generate(f'P2M_{i}', 'M', M,
+        head, code, P2M_opscount = p.generate(f'{name_prefix}P2M_{i}', 'M', M,
                                 coords + [q], operator='+=')
         print(f"P2M_{i} opscount = {P2M_opscount}")
         header += head
         body += code
         Ms = sp.Matrix(generate_M_shift_operators(i, symbols, M_dict, source_order=source_order))
         
-        head, code, M2M_opscount = p.generate(f'M2M_{i}', 'Ms', Ms,
+        head, code, M2M_opscount = p.generate(f'{name_prefix}M2M_{i}', 'Ms', Ms,
                                 list(symbols) + \
                                 [sp.MatrixSymbol('M', Nterms(i), 1)],
                                 operator="+=", atomic=atomic)
@@ -158,7 +165,7 @@ def generate_code(order, name, precision='double',
         L = sp.Matrix(generate_L_operators(i, symbols, M_dict, L_dict,
                       source_order=source_order))
 
-        head, code, M2L_opscount = p.generate(f'M2L_{i}', 'L', L,
+        head, code, M2L_opscount = p.generate(f'{name_prefix}M2L_{i}', 'L', L,
                                list(symbols) +  \
                                [sp.MatrixSymbol('M', Nterms(i), 1)],
                                 operator="+=", atomic=atomic, internal=[('D', derivs)])
@@ -167,7 +174,7 @@ def generate_code(order, name, precision='double',
         print(f"M2L_{i} opscount = {M2L_opscount}")
 
         Ls = sp.Matrix(generate_L_shift_operators(i, symbols, L_dict, source_order=source_order))
-        head, code, L2L_opscount = p.generate(f'L2L_{i}', 'Ls', Ls,
+        head, code, L2L_opscount = p.generate(f'{name_prefix}L2L_{i}', 'Ls', Ls,
                                list(symbols) + \
                                [sp.MatrixSymbol('L', Nterms(i), 1)],
                                 operator="+=", atomic=atomic)
@@ -180,7 +187,7 @@ def generate_code(order, name, precision='double',
                                     field=field)
         
         Fs = sp.Matrix(L2P)
-        head, code, L2P_opscount = p.generate(f'L2P_{i}', 'F', Fs,
+        head, code, L2P_opscount = p.generate(f'{name_prefix}L2P_{i}', 'F', Fs,
                                list(symbols) + \
                                [sp.MatrixSymbol('L', Nterms(i), 1)],
                                 operator="+=", atomic=atomic)
@@ -192,7 +199,7 @@ def generate_code(order, name, precision='double',
                                      potential=potential,
                                      field=field, source_order=source_order, harmonic_derivs=harmonic_derivs)
         Fs = sp.Matrix(M2P)
-        head, code, M2P_opscount = p.generate(f'M2P_{i}', 'F', Fs,
+        head, code, M2P_opscount = p.generate(f'{name_prefix}M2P_{i}', 'F', Fs,
                                 list(symbols) + \
                                 [sp.MatrixSymbol('M', Nterms(i), 1)],
                                 operator="+=", atomic=atomic)
@@ -205,14 +212,24 @@ def generate_code(order, name, precision='double',
                                                    field=field,
                                                    source_order=source_order))
 
-            head, code, P2P_opscount = p.generate(f'P2P', 'F', P2P,
+            head, code, P2P_opscount = p.generate(f'{name_prefix}P2P', 'F', P2P,
                                     list(symbols) + \
                                     [sp.MatrixSymbol('S', Nterms(i), 1)],
                                     operator="+=", atomic=atomic
                                     )
             print(f"P2P opscount = {P2P_opscount}")
-            header += head
-            body += code + '\n'
+            if write_templates:
+                if name_prefix != "":
+                    code = code.replace(name_prefix, "")
+                    head = head.replace(name_prefix, "")
+                code = code[:8] + f"<{source_order}, {osize}>" + code[8:]
+                body += "template<>\n"
+                body += code + '\n'
+                header += "template<int m_order, int osize>\n" 
+                header += head
+            else:
+                header += head
+                body += code + '\n'
 
         if save_opscounts:
             if i == start:
@@ -245,16 +262,25 @@ def generate_code(order, name, precision='double',
     wrapper_funcs = [f.replace(')', ', int order)').replace(f'_{start}', '')
                      for f in unique_funcs]
 
-    #  print(wrapper_funcs)
-
     func_definitions += wrapper_funcs
     # print('\n'.join(func_definitions))
 
     for wfunc, func in zip(wrapper_funcs, unique_funcs):
-        # Add to header file
-        header += wfunc + ';\n'
+        print(wfunc)
+        if not write_templates:
+            # Add to header file
+            header += wfunc + ';\n'
         # Create a switch statement that covers all functions:
-        code = wfunc + " {\n"
+        if write_templates:
+            if name_prefix != "":
+                wfunc = wfunc.replace(name_prefix, "")
+            header += "template<int m_order, int osize>\n"
+            header += wfunc + ';\n'
+            code = "template<>\n"
+            wfunc = wfunc[:8] + f"<{source_order}, {osize}>" + wfunc[8:]
+            code += wfunc + " {\n"
+        else:
+            code = wfunc + " {\n"
         code += 'switch (order) {\n'
         for i in range(start, order):
             code += '  case {}:\n'.format(i)
@@ -271,17 +297,20 @@ def generate_code(order, name, precision='double',
     else:
         f = open(f"{include_dir.rstrip('/')}/{name}.{hext}", 'w')
     f.write(f"#pragma once\n")
-    f.write(f"#define FMMGEN_MINORDER {start}\n")
-    f.write(f"#define FMMGEN_MAXORDER {order}\n")
-    f.write(f"#define FMMGEN_SOURCEORDER {source_order}\n")
-    f.write(f"#define FMMGEN_SOURCESIZE {Nterms(source_order) - Nterms(source_order - 1)}\n")
-    if potential and not field:
-        osize = 1
-    elif field and not potential:
-        osize = 3
-    elif field and potential:
-        osize = 4
-    f.write(f"#define FMMGEN_OUTPUTSIZE {osize}\n")
+    if write_defines:
+        f.write(f"#define FMMGEN_MINORDER {start}\n")
+        f.write(f"#define FMMGEN_MAXORDER {order}\n")
+        f.write(f"#define FMMGEN_SOURCEORDER {source_order}\n")
+        f.write(f"#define FMMGEN_SOURCESIZE {Nterms(source_order) - Nterms(source_order - 1)}\n")
+    # else:
+    #     f.write(f"static int {name_prefix}fmmgen_minorder = {start};\n")
+    #     f.write(f"static int {name_prefix}fmmgen_maxorder = {order};\n")
+    #     f.write(f"static int {name_prefix}fmmgen_sourceorder = {source_order};\n")
+    #     f.write(f"static int {name_prefix}fmmgen_sourcesize = {Nterms(source_order) - Nterms(source_order - 1)};\n") 
+    if write_defines:
+        f.write(f"#define FMMGEN_OUTPUTSIZE {osize}\n")
+    # else:
+    #     f.write(f"static int {name_prefix}fmmgen_outputsize = {osize};\n")
     f.write(header)
     f.close()
 
