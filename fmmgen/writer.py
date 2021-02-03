@@ -19,7 +19,7 @@ from fmmgen.generator import generate_mappings, generate_M_operators, \
                   generate_L_shift_operators, \
                   generate_L2P_operators, \
                   generate_M2P_operators, \
-                  generate_P2P_operators, generate_derivs
+                  generate_P2P_operators, generate_derivs, generate_P2P_operators_thole
 
 import logging
 logger = logging.getLogger(name="fmmgen")
@@ -218,6 +218,31 @@ def generate_code(order, name, precision='double',
                                     operator="+=", atomic=atomic
                                     )
             print(f"P2P opscount = {P2P_opscount}")
+            if write_templates:
+                if name_prefix != "":
+                    code = code.replace(name_prefix, "")
+                    head = head.replace(name_prefix, "")
+                code = code[:8] + f"<{source_order}, {osize}>" + code[8:]
+                body += "template<>\n"
+                body += code + '\n'
+                header += "template<int m_order, int osize>\n" 
+                header += head
+            else:
+                header += head
+                body += code + '\n'
+        if i == start:
+            symbols_thole = list(symbols)
+            symbols_thole.append(sp.symbols('a'))
+            P2P = sp.Matrix(generate_P2P_operators_thole(symbols, M_dict,
+                                                   potential=potential,
+                                                   field=field,
+                                                   source_order=source_order))
+
+            head, code, P2P_opscount = p.generate(f'{name_prefix}P2P', 'F', P2P,
+                                    symbols_thole + \
+                                    [sp.MatrixSymbol('S', Nterms(i), 1)],
+                                    operator="+=", atomic=atomic
+                                    )
             if write_templates:
                 if name_prefix != "":
                     code = code.replace(name_prefix, "")

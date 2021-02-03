@@ -349,3 +349,40 @@ def generate_P2P_operators(symbols, M_dict, potential=True, field=True, source_o
         terms.append(Fy)
         terms.append(Fz)
     return terms
+
+def generate_P2P_operators_thole(symbols, M_dict, potential=True, field=True, source_order=0):
+    order = source_order
+    M_dict, _ = generate_mappings(source_order, symbols, 'grevlex',
+                                  source_order=source_order)
+    x, y, z, a = sp.symbols('x y z a')
+    R = (x**2 + y**2 + z**2) ** 0.5
+
+    S_map, _ = generate_mappings(source_order, [x, y, z], key='grevlex',
+                                 source_order=source_order)
+
+    M = sp.MatrixSymbol('M', Nterms(order), 1)
+    S = sp.MatrixSymbol('S', Nterms(order), 1)
+
+    subsdict = {M[i]: 0 for i in range(Nterms(order))}
+
+    for key in S_map.keys():
+        subsdict[M[M_dict[key]]] = S[M_dict[key]]
+
+    V = L((0, 0, 0), order, symbols, M_dict, source_order=source_order).subs('R', R).subs(subsdict)
+    v = R * a
+    fV = 1 - (sp.Rational(1, 2) * v + 1) * sp.exp(-v)
+    V *= fV
+
+    terms = []
+    # Note: R must be substituted late for correct derivatives!
+    if potential:
+        terms.append(V.subs(R, 'R'))
+
+    if field:
+        Fx = -sp.diff(V, x).subs(R, 'R')
+        Fy = -sp.diff(V, y).subs(R, 'R')
+        Fz = -sp.diff(V, z).subs(R, 'R')
+        terms.append(Fx)
+        terms.append(Fy)
+        terms.append(Fz)
+    return terms
